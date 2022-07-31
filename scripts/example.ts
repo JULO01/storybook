@@ -1,6 +1,18 @@
+/* eslint-disable no-restricted-syntax, no-await-in-loop */
 import path from 'path';
-import { remove, pathExists, readJSON, writeJSON } from 'fs-extra';
+import {
+  remove,
+  pathExists,
+  readJSON,
+  writeJSON,
+  ensureSymlink,
+  readFile,
+  writeFile,
+  mkdir,
+} from 'fs-extra';
 import prompts from 'prompts';
+import globby from 'globby';
+import { transform } from 'esbuild';
 
 import { getOptionsOrPrompt } from './utils/options';
 import { executeCLIStep } from './utils/cli-step';
@@ -12,8 +24,25 @@ import { babelParse } from '../code/lib/csf-tools/src/babelParse';
 
 const frameworks = ['react', 'angular'];
 const addons = ['a11y', 'storysource'];
+const defaultAddons = [
+  'actions',
+  'backgrounds',
+  'controls',
+  'docs',
+  'highlight',
+  'links',
+  'interactions',
+  'measure',
+  'outline',
+  'toolbars',
+  'viewport',
+];
 const examplesDir = path.resolve(__dirname, '../examples');
 const codeDir = path.resolve(__dirname, '../code');
+
+// TODO -- how to encode this information
+const renderersMap = { react: 'react', angular: 'angular' };
+const isTSMap = { react: false, angular: true };
 
 async function getOptions() {
   return getOptionsOrPrompt('yarn example', {
@@ -141,11 +170,55 @@ const addPackageScripts = async ({
   await writeJSON(packageJsonPath, packageJson, { spaces: 2 });
 };
 
+// Copied from `esbuild-register` -- is there a simple way to do this?
+type LOADERS = 'js' | 'jsx' | 'ts' | 'tsx';
+const FILE_LOADERS = {
+  '.js': 'js',
+  '.jsx': 'jsx',
+  '.ts': 'ts',
+  '.tsx': 'tsx',
+  '.mjs': 'js',
+} as const;
+
+type EXTENSIONS = keyof typeof FILE_LOADERS;
+const getLoader = (filename: string): LOADERS => FILE_LOADERS[path.extname(filename) as EXTENSIONS];
+
+async function copyStories(from: string, to: string, { isTS }: { isTS: boolean }) {
+  if (!(await pathExists(from))) return;
+
+  if (isTS) {
+    await ensureSymlink(from, to);
+    return;
+  }
+
+  await mkdir(to);
+  const files = await globby(`${from}/**/*.*`);
+  await Promise.all(
+    files.map(async (fromPath) => {
+      const inputCode = await readFile(fromPath, 'utf8');
+      const { code } = await transform(inputCode, {
+        sourcefile: fromPath,
+        loader: getLoader(fromPath),
+        target: `node${process.version.slice(1)}`,
+        format: 'esm',
+        tsconfigRaw: `{
+          "compilerOptions": {
+            "strict": false,
+            "skipLibCheck": true,
+          },
+        }`,
+      });
+      const toPath = path.resolve(to, path.relative(from, fromPath).replace(/tsx?$/, 'js'));
+      await writeFile(toPath, code);
+    })
+  );
+}
+
 async function main() {
   const optionValues = await getOptions();
 
   const { framework, forceDelete, forceReuse, link, dryRun } = optionValues;
-  const cwd = path.join(examplesDir, framework as string);
+  const cwd = path.join(examplesDir, framework);
 
   const exists = await pathExists(cwd);
   let shouldDelete = exists && !forceReuse;
@@ -171,19 +244,31 @@ async function main() {
       dryRun,
     });
 
+    // TODO -- this seems like it might be framework specific. Should we search for a folder?
+    // or set it in the config somewhere?
+    const storiesDir = path.resolve(cwd, './stories');
+
+    // TODO -- can we get the options type to return something more specific
+    const renderer = renderersMap[framework as 'react' | 'angular'];
+    const isTS = isTSMap[framework as 'react' | 'angular'];
+    // Copy over renderer stories
+    const rendererStoriesDir = path.resolve(codeDir, `./renderers/${renderer}/src/stories`);
+    await copyStories(rendererStoriesDir, path.join(storiesDir, renderer), { isTS });
+
     // TODO -- sb add <addon> doesn't actually work properly:
     //   - installs in `deps` not `devDeps`
     //   - does a `workspace:^` install (what does that mean?)
     //   - doesn't add to `main.js`
 
-    // eslint-disable-next-line no-restricted-syntax
-    for (const addon of optionValues.addon as string[]) {
+    for (const addon of optionValues.addon) {
       const addonName = `@storybook/addon-${addon}`;
-      // eslint-disable-next-line no-await-in-loop
       await executeCLIStep(steps.add, { argument: addonName, cwd, dryRun });
     }
 
-    // TODO copy stories
+    for (const addon of [...defaultAddons, ...optionValues.addon]) {
+      const addonStoriesDir = path.resolve(codeDir, `addons/${addon}/src/stories`);
+      await copyStories(addonStoriesDir, path.join(storiesDir, `addon-${addon}`), { isTS });
+    }
 
     if (link) {
       await executeCLIStep(steps.link, {
@@ -199,7 +284,7 @@ async function main() {
         // @ts-ignore (not sure why TS complains here, it does exist)
         webpackFinal: babelParse(code).program.body[0].expression,
       };
-      await overrideMainConfig({ cwd, mainOverrides } as any);
+      await overrideMainConfig({ cwd, mainOverrides });
 
       await addPackageScripts({
         cwd,

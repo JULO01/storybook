@@ -34,6 +34,11 @@
       "require": "./package.json",
       "import": "./package.json",
       "types": "./package.json"
+    },
+    "./test-components": {
+      "require": "./dist/test-components/preview.js",
+      "import": "./dist/test-components/preview.mjs",
+      "types": "./dist/test-components/preview.d.ts"
     }
   },
   "main": "dist/index.js",
@@ -97,7 +102,8 @@
   "bundler": {
     "entries": [
       "./src/index.ts",
-      "./src/config.ts"
+      "./src/config.ts",
+      "./src/test-components/preview.tsx"
     ],
     "platform": "browser"
   },

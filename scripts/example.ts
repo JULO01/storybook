@@ -135,9 +135,11 @@ const logger = console;
 export const overrideMainConfig = async ({
   cwd,
   mainOverrides,
+  isNode = false,
 }: {
   cwd: string;
   mainOverrides: Parameters['mainOverrides'];
+  isNode?: boolean;
 }) => {
   logger.info(`📝 Overwriting main.js with the following configuration:`);
   const configDir = path.join(cwd, '.storybook');
@@ -146,8 +148,12 @@ export const overrideMainConfig = async ({
   const mainConfig = await readConfig(mainConfigPath);
 
   Object.keys(mainOverrides).forEach((field) => {
-    // NOTE: using setFieldNode and passing the output of babelParse()
-    mainConfig.setFieldNode([field], mainOverrides[field]);
+    if (isNode) {
+      // NOTE: using setFieldNode and passing the output of babelParse()
+      mainConfig.setFieldNode([field], mainOverrides[field]);
+    } else {
+      mainConfig.setFieldValue([field], mainOverrides[field]);
+    }
   });
 
   await writeConfig(mainConfig);
@@ -255,6 +261,12 @@ async function main() {
     const rendererStoriesDir = path.resolve(codeDir, `./renderers/${renderer}/src/stories`);
     await copyStories(rendererStoriesDir, path.join(storiesDir, renderer), { isTS });
 
+    // TODO: why can I not just use `@storybook/react/test-components`? @ndelangen?
+    const testComponentsMainOverrides = {
+      previewEntries: [`@storybook/${renderer}/dist/test-components/preview.mjs`],
+    };
+    await overrideMainConfig({ cwd, mainOverrides: testComponentsMainOverrides });
+
     // TODO -- sb add <addon> doesn't actually work properly:
     //   - installs in `deps` not `devDeps`
     //   - does a `workspace:^` install (what does that mean?)
@@ -280,11 +292,11 @@ async function main() {
 
       // TODO -- work out exactly where this should happen
       const code = '(c) => ({ ...c, resolve: { ...c.resolve, symlinks: false } })';
-      const mainOverrides = {
+      const linkingMainOverrides = {
         // @ts-ignore (not sure why TS complains here, it does exist)
         webpackFinal: babelParse(code).program.body[0].expression,
       };
-      await overrideMainConfig({ cwd, mainOverrides });
+      await overrideMainConfig({ cwd, mainOverrides: linkingMainOverrides, isNode: true });
 
       await addPackageScripts({
         cwd,

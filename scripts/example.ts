@@ -103,27 +103,6 @@ const steps = {
 
 const logger = console;
 
-export const overrideMainConfig = async ({
-  cwd,
-  mainOverrides,
-}: {
-  cwd: string;
-  mainOverrides: Parameters['mainOverrides'];
-}) => {
-  logger.info(`📝 Overwriting main.js with the following configuration:`);
-  const configDir = path.join(cwd, '.storybook');
-  const mainConfigPath = getInterpretedFile(path.resolve(configDir, 'main'));
-  logger.debug(mainOverrides);
-  const mainConfig = await readConfig(mainConfigPath);
-
-  Object.keys(mainOverrides).forEach((field) => {
-    // NOTE: using setFieldNode and passing the output of babelParse()
-    mainConfig.setFieldNode([field], mainOverrides[field]);
-  });
-
-  await writeConfig(mainConfig);
-};
-
 const addPackageScripts = async ({
   cwd,
   scripts,
@@ -192,14 +171,6 @@ async function main() {
         dryRun,
         optionValues: { local: true, start: false },
       });
-
-      // TODO -- work out exactly where this should happen
-      const code = '(c) => ({ ...c, resolve: { ...c.resolve, symlinks: false } })';
-      const mainOverrides = {
-        // @ts-ignore (not sure why TS complains here, it does exist)
-        webpackFinal: babelParse(code).program.body[0].expression,
-      };
-      await overrideMainConfig({ cwd, mainOverrides } as any);
 
       await addPackageScripts({
         cwd,

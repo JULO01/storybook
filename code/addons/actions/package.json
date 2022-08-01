@@ -26,6 +26,7 @@
   "types": "dist/types/index.d.ts",
   "files": [
     "dist/**/*",
+    "!dist/stories/**/*",
     "README.md",
     "*.js",
     "*.d.ts"

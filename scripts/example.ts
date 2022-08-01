@@ -170,46 +170,12 @@ const addPackageScripts = async ({
   await writeJSON(packageJsonPath, packageJson, { spaces: 2 });
 };
 
-// Copied from `esbuild-register` -- is there a simple way to do this?
-type LOADERS = 'js' | 'jsx' | 'ts' | 'tsx';
-const FILE_LOADERS = {
-  '.js': 'js',
-  '.jsx': 'jsx',
-  '.ts': 'ts',
-  '.tsx': 'tsx',
-  '.mjs': 'js',
-} as const;
-
-type EXTENSIONS = keyof typeof FILE_LOADERS;
-const getLoader = (filename: string): LOADERS => FILE_LOADERS[path.extname(filename) as EXTENSIONS];
-
-async function copyStories(from: string, to: string, { isTS }: { isTS: boolean }) {
-  if (!(await pathExists(from))) return;
-
-  if (isTS) {
-    await ensureSymlink(from, to);
-    return;
-  }
-
-  await mkdir(to);
-  const files = await globby(`${from}/**/*.*`);
+async function copyStories(possibleFrom: string[], to: string) {
   await Promise.all(
-    files.map(async (fromPath) => {
-      const inputCode = await readFile(fromPath, 'utf8');
-      const { code } = await transform(inputCode, {
-        sourcefile: fromPath,
-        loader: getLoader(fromPath),
-        target: `node${process.version.slice(1)}`,
-        format: 'esm',
-        tsconfigRaw: `{
-          "compilerOptions": {
-            "strict": false,
-            "skipLibCheck": true,
-          },
-        }`,
-      });
-      const toPath = path.resolve(to, path.relative(from, fromPath).replace(/tsx?$/, 'js'));
-      await writeFile(toPath, code);
+    possibleFrom.map(async (from) => {
+      if (!(await pathExists(from))) return;
+
+      await ensureSymlink(from, to);
     })
   );
 }
@@ -251,9 +217,14 @@ async function main() {
     // TODO -- can we get the options type to return something more specific
     const renderer = renderersMap[framework as 'react' | 'angular'];
     const isTS = isTSMap[framework as 'react' | 'angular'];
+    const possiblePackageStoriesDir = isTS ? ['src/stories'] : ['dist/stories', 'dist/esm/stories'];
+
     // Copy over renderer stories
-    const rendererStoriesDir = path.resolve(codeDir, `./renderers/${renderer}/src/stories`);
-    await copyStories(rendererStoriesDir, path.join(storiesDir, renderer), { isTS });
+    const rendererDir = path.join(codeDir, 'renderers', renderer);
+    await copyStories(
+      possiblePackageStoriesDir.map((dir) => path.join(rendererDir, dir)),
+      path.join(storiesDir, renderer)
+    );
 
     // TODO -- sb add <addon> doesn't actually work properly:
     //   - installs in `deps` not `devDeps`
@@ -266,8 +237,12 @@ async function main() {
     }
 
     for (const addon of [...defaultAddons, ...optionValues.addon]) {
-      const addonStoriesDir = path.resolve(codeDir, `addons/${addon}/src/stories`);
-      await copyStories(addonStoriesDir, path.join(storiesDir, `addon-${addon}`), { isTS });
+      const addonStoriesDir = path.join(codeDir, 'addons', addon);
+
+      await copyStories(
+        possiblePackageStoriesDir.map((dir) => path.join(addonStoriesDir, dir)),
+        path.join(storiesDir, `addon-${addon}`)
+      );
     }
 
     if (link) {

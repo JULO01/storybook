@@ -41,6 +41,7 @@
   "types": "dist/index.d.ts",
   "files": [
     "dist/**/*",
+    "!dist/stories/**/*",
     "types/**/*",
     "README.md",
     "*.js",
@@ -97,7 +98,8 @@
   "bundler": {
     "entries": [
       "./src/index.ts",
-      "./src/config.ts"
+      "./src/config.ts",
+      "./src/stories/decorators.stories.tsx"
     ],
     "platform": "browser"
   },
